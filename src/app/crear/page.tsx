@@ -1,9 +1,36 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import FormField from "@/components/FormField";
 import Button from "@/components/Button";
 import Link from "next/link";
+import { useWeb3 } from "@/lib/web3";
+import { usePrivy } from "@privy-io/react-auth";
+
+// Función para subir archivos a IPFS (simulada por ahora)
+const uploadToIPFS = async (file: File): Promise<string> => {
+  // En un entorno real, aquí subiríamos el archivo a IPFS
+  // Por ahora, simulamos el proceso devolviendo un hash aleatorio
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  return `bafybeih${Math.random().toString(36).substring(2, 15)}`;
+};
+
+// Función para generar un objeto JSON con los metadatos del certificado
+const generateMetadata = (formData: any, ipfsImageUrl: string | null): any => {
+  return {
+    title: formData.title,
+    issuer: formData.issuer,
+    recipient: formData.recipient,
+    recipientEmail: formData.recipientEmail,
+    description: formData.description,
+    skills: formData.skills
+      ? formData.skills.split(",").map((s: string) => s.trim())
+      : [],
+    expirationDate: formData.expirationDate || null,
+    imageUrl: ipfsImageUrl,
+    createdAt: new Date().toISOString(),
+  };
+};
 
 export default function CrearCertificadoPage() {
   const [formData, setFormData] = useState({
@@ -14,6 +41,7 @@ export default function CrearCertificadoPage() {
     description: "",
     expirationDate: "",
     skills: "",
+    recipientAddress: "", // Dirección de wallet del receptor
   });
 
   const [certificateImage, setCertificateImage] = useState<File | null>(null);
@@ -21,7 +49,11 @@ export default function CrearCertificadoPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [isError, setIsError] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string>("");
   const [newCertificateId, setNewCertificateId] = useState<string | null>(null);
+
+  const { login } = usePrivy();
+  const web3 = useWeb3();
 
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
@@ -46,19 +78,53 @@ export default function CrearCertificadoPage() {
     e.preventDefault();
     setIsSubmitting(true);
     setIsError(false);
+    setErrorMessage("");
 
     try {
-      // Simulación de envío de datos
-      // En un entorno real, aquí se conectaría con la API para crear el certificado
-      // y registrarlo en blockchain
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      // Verifica si el usuario está conectado con su wallet
+      if (!web3.isReady) {
+        login();
+        throw new Error("Por favor, conecta tu wallet primero");
+      }
 
-      // Simulación de ID generado
-      setNewCertificateId("cert-" + Math.floor(Math.random() * 1000));
+      // 1. Subir la imagen a IPFS si existe
+      let imageIpfsHash = null;
+      if (certificateImage) {
+        imageIpfsHash = await uploadToIPFS(certificateImage);
+      }
+
+      // 2. Crear los metadatos del certificado
+      const metadata = generateMetadata(formData, imageIpfsHash);
+
+      // 3. Subir los metadatos a IPFS
+      const metadataIpfsHash = await uploadToIPFS(
+        new File([JSON.stringify(metadata)], "metadata.json", {
+          type: "application/json",
+        })
+      );
+
+      // 4. Determinar la fecha de expiración para la blockchain (en timestamp UNIX)
+      const expirationTimestamp = formData.expirationDate
+        ? Math.floor(new Date(formData.expirationDate).getTime() / 1000)
+        : 0;
+
+      // 5. Emitir el certificado en la blockchain
+      const result = await web3.issueCertificate(
+        formData.recipientAddress,
+        metadataIpfsHash,
+        Math.floor(Math.random() * 1000000), // ID aleatorio para el ejemplo
+        expirationTimestamp
+      );
+
+      // 6. Actualizar la UI con el ID del certificado creado
+      setNewCertificateId(result.tokenId.toString());
       setIsSuccess(true);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error al crear el certificado:", error);
       setIsError(true);
+      setErrorMessage(
+        error.message || "Error al crear el certificado. Inténtalo de nuevo."
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -212,6 +278,16 @@ export default function CrearCertificadoPage() {
               required
             />
 
+            <FormField
+              label="Dirección de Wallet del Destinatario"
+              id="recipientAddress"
+              name="recipientAddress"
+              value={formData.recipientAddress}
+              onChange={handleChange}
+              placeholder="0x..."
+              required
+            />
+
             <div className="mt-6">
               <h3 className="font-bold text-lg mb-4 pb-2 border-b border-dark-lightest">
                 Imagen del Certificado
@@ -249,12 +325,27 @@ export default function CrearCertificadoPage() {
           <Link href="/certificados">
             <Button variant="outline">Cancelar</Button>
           </Link>
-          <Button type="submit" variant="primary" disabled={isSubmitting}>
+          <Button
+            type="submit"
+            variant="primary"
+            disabled={
+              isSubmitting ||
+              web3.isInitializing ||
+              (!web3.isReady && !web3.isInitializing)
+            }
+          >
             {isSubmitting ? (
               <div className="flex items-center gap-2">
                 <div className="animate-spin h-4 w-4 border-2 border-t-transparent border-white rounded-full"></div>
                 Creando certificado...
               </div>
+            ) : web3.isInitializing ? (
+              <div className="flex items-center gap-2">
+                <div className="animate-spin h-4 w-4 border-2 border-t-transparent border-white rounded-full"></div>
+                Verificando wallet...
+              </div>
+            ) : !web3.isReady ? (
+              "Conectar wallet para crear"
             ) : (
               "Crear y Registrar Certificado"
             )}
@@ -263,8 +354,21 @@ export default function CrearCertificadoPage() {
 
         {isError && (
           <div className="mt-4 p-4 bg-red-900/20 border border-red-500/50 text-red-500 rounded-md">
-            Ocurrió un error al crear el certificado. Por favor, intenta
-            nuevamente.
+            {errorMessage ||
+              "Ocurrió un error al crear el certificado. Por favor, intenta nuevamente."}
+          </div>
+        )}
+
+        {!web3.isReady && !web3.isInitializing && !isError && (
+          <div className="mt-4 p-4 bg-blue-900/20 border border-blue-500/50 text-blue-500 rounded-md">
+            Necesitas conectar tu wallet para poder crear certificados. Haz clic
+            en "Conectar Wallet" en la barra de navegación.
+          </div>
+        )}
+
+        {web3.isReady && (
+          <div className="mt-4 p-4 bg-green-900/20 border border-green-500/50 text-green-500 rounded-md">
+            Wallet conectada: {web3.address}
           </div>
         )}
       </form>

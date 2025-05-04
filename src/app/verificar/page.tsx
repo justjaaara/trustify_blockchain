@@ -4,91 +4,202 @@ import { useState } from "react";
 import Link from "next/link";
 import Button from "@/components/Button";
 import FormField from "@/components/FormField";
+import { useWeb3 } from "@/lib/web3";
+import { usePrivy } from "@privy-io/react-auth";
 
 type VerificationStatus = "idle" | "verifying" | "success" | "error";
+
+interface VerificationResult {
+  certificate: {
+    id: string;
+    title: string;
+    issuer: string;
+    recipient: string;
+    date: string;
+    imageUrl?: string;
+  };
+  blockchainData: {
+    tokenId: string;
+    issueDate: string;
+    expirationDate: string | null;
+    institution: string;
+    ipfsHash: string;
+    revoked: boolean;
+    owner: string;
+  };
+}
+
+// Función para obtener metadatos desde IPFS (simulada)
+const getMetadataFromIPFS = async (ipfsHash: string): Promise<any> => {
+  // En un entorno real, aquí recuperaríamos los datos de IPFS
+  // Por ahora, simulamos con datos aleatorios
+  await new Promise((resolve) => setTimeout(resolve, 800));
+  return {
+    title: "Certificado de Blockchain Avanzado",
+    issuer: "Academia Blockchain",
+    recipient: "Ana García",
+    description:
+      "Completó satisfactoriamente el curso de desarrollo blockchain avanzado",
+    skills: ["Solidity", "Smart Contracts", "DApps"],
+    expirationDate: null,
+    imageUrl: "/certificate-1.jpg",
+    createdAt: "2025-01-15T10:30:00Z",
+  };
+};
 
 export default function VerificarPage() {
   const [verificationType, setVerificationType] = useState<"id" | "file">("id");
   const [certificateId, setCertificateId] = useState("");
   const [certificateFile, setCertificateFile] = useState<File | null>(null);
-  const [status, setStatus] = useState<VerificationStatus>("idle");
-  const [verificationResult, setVerificationResult] = useState<any>(null);
-  const [error, setError] = useState("");
+  const [verificationStatus, setVerificationStatus] =
+    useState<VerificationStatus>("idle");
+  const [verificationResult, setVerificationResult] =
+    useState<VerificationResult | null>(null);
+  const [errorMessage, setErrorMessage] = useState("");
+
+  const { login } = usePrivy();
+  const web3 = useWeb3();
+
+  const handleIdChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setCertificateId(e.target.value);
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] || null;
     setCertificateFile(file);
   };
 
-  const handleVerify = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    if (verificationType === "id" && !certificateId.trim()) {
-      setError("Por favor, ingresa un ID de certificado válido");
-      return;
-    }
-
-    if (verificationType === "file" && !certificateFile) {
-      setError("Por favor, selecciona un archivo de certificado");
-      return;
-    }
-
-    setError("");
-    setStatus("verifying");
+  const handleVerify = async () => {
+    setVerificationStatus("verifying");
+    setErrorMessage("");
 
     try {
-      // Simulación de verificación en blockchain
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-
-      // Para propósitos de demostración, simulamos una respuesta exitosa cuando:
-      // - El ID comienza con "cert-"
-      // - O cuando hay un archivo subido
-      if (
-        (verificationType === "id" && certificateId.startsWith("cert-")) ||
-        (verificationType === "file" && certificateFile)
-      ) {
-        // Simulación de datos de certificado válido
-        setVerificationResult({
-          isValid: true,
-          certificate: {
-            id: verificationType === "id" ? certificateId : "cert-file-001",
-            title: "Certificado de Curso de Blockchain",
-            issuer: "Academia Blockchain",
-            issuer_id: "0x1234...5678",
-            recipient: "Ana García",
-            date: "2025-03-15",
-            transactionHash: "0xabcd...ef12",
-            blockNumber: 12345678,
-          },
-        });
-        setStatus("success");
-      } else {
-        setVerificationResult({
-          isValid: false,
-          reason:
-            "El certificado no está registrado en la blockchain o el ID es inválido.",
-        });
-        setStatus("error");
+      // Si no está conectado a la wallet, sugerir conectarse
+      if (!web3.isReady) {
+        login();
+        throw new Error(
+          "Por favor, conecta tu wallet para verificar certificados"
+        );
       }
-    } catch (err) {
-      console.error("Error al verificar el certificado:", err);
-      setStatus("error");
-      setError(
-        "Ocurrió un error durante la verificación. Por favor, intenta nuevamente."
+
+      let tokenId: number;
+
+      if (verificationType === "id") {
+        // Verificar por ID
+        if (!certificateId.trim()) {
+          throw new Error("Por favor, ingresa un ID de certificado válido");
+        }
+        tokenId = parseInt(certificateId);
+      } else {
+        // Verificar por archivo
+        if (!certificateFile) {
+          throw new Error("Por favor, selecciona un archivo de certificado");
+        }
+
+        // Leer el archivo y extraer el ID del certificado
+        // Esta es una simulación, en producción se leería realmente el archivo
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        tokenId = Math.floor(Math.random() * 100) + 1; // Simulando ID extraído del archivo
+      }
+
+      // Verificar en la blockchain
+      const verificationData = await web3.verifyCertificate(tokenId);
+
+      if (!verificationData.valid) {
+        throw new Error(
+          "El certificado no es válido o no existe en la blockchain"
+        );
+      }
+
+      // Obtener metadatos desde IPFS
+      const metadata = await getMetadataFromIPFS(
+        verificationData.details.ipfsHash
       );
+
+      // Crear el resultado de la verificación
+      setVerificationResult({
+        certificate: {
+          id: tokenId.toString(),
+          title: metadata.title,
+          issuer: metadata.issuer,
+          recipient: metadata.recipient,
+          date: new Date(
+            verificationData.details.issueDate
+          ).toLocaleDateString(),
+          imageUrl: metadata.imageUrl,
+        },
+        blockchainData: {
+          tokenId: tokenId.toString(),
+          issueDate: verificationData.details.issueDate,
+          expirationDate: verificationData.details.expirationDate,
+          institution: verificationData.details.institution,
+          ipfsHash: verificationData.details.ipfsHash,
+          revoked: verificationData.details.revoked,
+          owner: verificationData.details.owner,
+        },
+      });
+
+      setVerificationStatus("success");
+    } catch (error: any) {
+      console.error("Error al verificar el certificado:", error);
+      setErrorMessage(
+        error.message || "Ocurrió un error al verificar el certificado"
+      );
+      setVerificationStatus("error");
     }
   };
 
   const renderVerificationResult = () => {
-    if (status !== "success" && status !== "error") return null;
-
-    if (!verificationResult.isValid) {
+    if (verificationStatus === "verifying") {
       return (
-        <div className="mt-8 p-6 bg-red-900/20 border border-red-500/50 rounded-lg">
-          <div className="flex items-center mb-4">
-            <div className="mr-3 bg-red-900/30 p-2 rounded-full">
+        <div className="mt-8 text-center py-16 bg-gray-800 rounded-lg border border-gray-700">
+          <div className="animate-spin mx-auto mb-4 h-12 w-12 border-t-2 border-b-2 border-blue-500 rounded-full"></div>
+          <p className="text-xl font-medium text-gray-300">
+            Verificando certificado...
+          </p>
+        </div>
+      );
+    }
+
+    if (verificationStatus === "error") {
+      return (
+        <div className="mt-8 text-center py-16 bg-gray-800 rounded-lg border border-gray-700">
+          <svg
+            className="mx-auto h-12 w-12 text-red-500"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+            ></path>
+          </svg>
+          <p className="mt-4 text-xl font-medium text-red-500">
+            Error de verificación
+          </p>
+          <p className="mt-2 text-gray-400">{errorMessage}</p>
+          <Button
+            variant="outline"
+            className="mt-6"
+            onClick={() => setVerificationStatus("idle")}
+          >
+            Intentar nuevamente
+          </Button>
+        </div>
+      );
+    }
+
+    if (verificationStatus === "success" && verificationResult) {
+      return (
+        <div className="mt-8 bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
+          <div className="bg-green-900/20 border-b border-gray-700 p-4">
+            <div className="flex items-center">
               <svg
-                className="w-6 h-6 text-red-500"
+                className="h-6 w-6 text-green-500 mr-2"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -98,116 +209,99 @@ export default function VerificarPage() {
                   strokeLinecap="round"
                   strokeLinejoin="round"
                   strokeWidth={2}
-                  d="M6 18L18 6M6 6l12 12"
+                  d="M5 13l4 4L19 7"
                 ></path>
               </svg>
+              <span className="text-lg font-medium text-green-500">
+                Certificado verificado con éxito
+              </span>
             </div>
-            <h3 className="text-xl font-bold text-red-500">
-              Certificado No Verificado
-            </h3>
           </div>
-          <p className="text-gray-300">{verificationResult.reason}</p>
-          <div className="mt-4">
-            <Link href="/crear">
-              <Button variant="primary">Crear un certificado</Button>
-            </Link>
+
+          <div className="p-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              <div>
+                <h3 className="text-lg font-semibold mb-4 pb-2 border-b border-gray-700">
+                  Información del Certificado
+                </h3>
+                <div className="space-y-3">
+                  <div>
+                    <p className="text-sm text-gray-400">ID del Certificado</p>
+                    <p className="font-mono">
+                      {verificationResult.certificate.id}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-400">Título</p>
+                    <p>{verificationResult.certificate.title}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-400">Emisor</p>
+                    <p>{verificationResult.certificate.issuer}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-400">Destinatario</p>
+                    <p>{verificationResult.certificate.recipient}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-400">Fecha de Emisión</p>
+                    <p>{verificationResult.certificate.date}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <h3 className="text-lg font-semibold mb-4 pb-2 border-b border-gray-700">
+                  Datos en Blockchain
+                </h3>
+                <div className="space-y-3">
+                  <div>
+                    <p className="text-sm text-gray-400">Hash IPFS</p>
+                    <p className="font-mono text-sm truncate">
+                      {verificationResult.blockchainData.ipfsHash}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-400">
+                      Dirección del Propietario
+                    </p>
+                    <p className="font-mono text-sm truncate">
+                      {verificationResult.blockchainData.owner}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-400">Fecha de Expiración</p>
+                    <p>
+                      {verificationResult.blockchainData.expirationDate
+                        ? new Date(
+                            verificationResult.blockchainData.expirationDate
+                          ).toLocaleDateString()
+                        : "No expira"}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-400">Estado</p>
+                    <span
+                      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                        verificationResult.blockchainData.revoked
+                          ? "bg-red-900/20 text-red-500"
+                          : "bg-green-900/20 text-green-500"
+                      }`}
+                    >
+                      {verificationResult.blockchainData.revoked
+                        ? "Revocado"
+                        : "Activo"}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       );
     }
 
-    return (
-      <div className="mt-8 p-6 bg-green-900/20 border border-green-500/50 rounded-lg">
-        <div className="flex items-center mb-4">
-          <div className="mr-3 bg-green-900/30 p-2 rounded-full">
-            <svg
-              className="w-6 h-6 text-green-500"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M5 13l4 4L19 7"
-              ></path>
-            </svg>
-          </div>
-          <h3 className="text-xl font-bold text-green-500">
-            Certificado Verificado
-          </h3>
-        </div>
-
-        <div className="mt-4 space-y-3">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <span className="block text-xs text-gray-300">
-                ID del Certificado
-              </span>
-              <span className="font-mono">
-                {verificationResult.certificate.id}
-              </span>
-            </div>
-            <div>
-              <span className="block text-xs text-gray-300">Título</span>
-              <span>{verificationResult.certificate.title}</span>
-            </div>
-            <div>
-              <span className="block text-xs text-gray-300">Emisor</span>
-              <span>{verificationResult.certificate.issuer}</span>
-            </div>
-            <div>
-              <span className="block text-xs text-gray-300">ID del Emisor</span>
-              <span className="font-mono">
-                {verificationResult.certificate.issuer_id}
-              </span>
-            </div>
-            <div>
-              <span className="block text-xs text-gray-300">Destinatario</span>
-              <span>{verificationResult.certificate.recipient}</span>
-            </div>
-            <div>
-              <span className="block text-xs text-gray-300">
-                Fecha de Emisión
-              </span>
-              <span>{verificationResult.certificate.date}</span>
-            </div>
-          </div>
-
-          <div className="mt-6 pt-4 border-t border-gray-700">
-            <h4 className="text-sm font-semibold mb-2">
-              Información de Blockchain:
-            </h4>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <span className="block text-xs text-gray-300">
-                  Hash de Transacción
-                </span>
-                <span className="font-mono text-xs">
-                  {verificationResult.certificate.transactionHash}
-                </span>
-              </div>
-              <div>
-                <span className="block text-xs text-gray-300">
-                  Número de Bloque
-                </span>
-                <span className="font-mono">
-                  {verificationResult.certificate.blockNumber}
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="mt-6 flex gap-3">
-          <Link href={`/certificados/${verificationResult.certificate.id}`}>
-            <Button variant="primary">Ver certificado completo</Button>
-          </Link>
-        </div>
-      </div>
-    );
+    return null;
   };
 
   return (
@@ -262,60 +356,76 @@ export default function VerificarPage() {
           </div>
         </div>
 
-        <form onSubmit={handleVerify}>
-          {verificationType === "id" ? (
-            <div className="mb-6">
-              <FormField
-                label="ID del Certificado"
-                id="certificateId"
-                name="certificateId"
-                value={certificateId}
-                onChange={(e) => setCertificateId(e.target.value)}
-                placeholder="ej. cert-123"
-                required
-              />
-            </div>
-          ) : (
-            <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-200 mb-1">
-                Archivo del Certificado
-                <span className="text-red-500 ml-1">*</span>
-              </label>
-              <input
-                type="file"
-                accept=".pdf,.json"
-                onChange={handleFileChange}
-                className="w-full text-gray-300 bg-gray-900 rounded border border-gray-700 px-3 py-2"
-                required
-              />
-              <p className="mt-1 text-xs text-gray-400">
-                Formatos aceptados: PDF, JSON
-              </p>
-            </div>
-          )}
+        {verificationType === "id" ? (
+          <div className="mb-4">
+            <FormField
+              label="ID del Certificado"
+              id="certificateId"
+              value={certificateId}
+              onChange={handleIdChange}
+              placeholder="Ingresa el ID único del certificado"
+              required
+            />
+          </div>
+        ) : (
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              Archivo del Certificado
+            </label>
+            <input
+              type="file"
+              accept=".pdf,.json"
+              onChange={handleFileChange}
+              className="w-full bg-gray-700 rounded border border-gray-600 focus:border-blue-500 focus:ring-2 focus:ring-blue-500 text-base outline-none text-gray-300 py-2 px-3 transition-colors duration-200"
+            />
+            <p className="mt-1 text-sm text-gray-400">
+              Formatos aceptados: PDF, JSON
+            </p>
+          </div>
+        )}
 
-          {error && (
-            <div className="mb-4 p-3 bg-red-900/20 border border-red-500/50 text-red-500 rounded-md text-sm">
-              {error}
-            </div>
-          )}
-
+        <div className="mt-6">
           <Button
-            type="submit"
             variant="primary"
-            disabled={status === "verifying"}
-            className="w-full"
+            onClick={handleVerify}
+            disabled={
+              verificationStatus === "verifying" ||
+              web3.isInitializing ||
+              (!web3.isReady && !web3.isInitializing)
+            }
           >
-            {status === "verifying" ? (
-              <div className="flex items-center justify-center gap-2">
+            {verificationStatus === "verifying" ? (
+              <div className="flex items-center space-x-2">
                 <div className="animate-spin h-4 w-4 border-2 border-t-transparent border-white rounded-full"></div>
-                Verificando...
+                <span>Verificando...</span>
               </div>
+            ) : web3.isInitializing ? (
+              <div className="flex items-center space-x-2">
+                <div className="animate-spin h-4 w-4 border-2 border-t-transparent border-white rounded-full"></div>
+                <span>Verificando wallet...</span>
+              </div>
+            ) : !web3.isReady ? (
+              "Conectar wallet para verificar"
             ) : (
               "Verificar Certificado"
             )}
           </Button>
-        </form>
+        </div>
+
+        {!web3.isReady &&
+          !web3.isInitializing &&
+          verificationStatus === "idle" && (
+            <div className="mt-4 p-4 bg-blue-900/20 border border-blue-500/50 text-blue-500 rounded-md">
+              Necesitas conectar tu wallet para verificar certificados. Haz clic
+              en "Conectar Wallet" en la barra de navegación.
+            </div>
+          )}
+
+        {web3.isReady && verificationStatus === "idle" && (
+          <div className="mt-4 p-4 bg-green-900/20 border border-green-500/50 text-green-500 rounded-md">
+            Wallet conectada: {web3.address}
+          </div>
+        )}
 
         {renderVerificationResult()}
       </div>
