@@ -9,6 +9,7 @@ const whitelistedAddresses = [
   "0x5B023AaaBcBAE32114F2fc7FAeCF77f598Da97b4",
   "0x6f7D2051944b7653cCE7fE21D11b230D9b46cC58",
   "0x5C325b559267E30f5A6e237f8e67eC3174A82B85",
+  "0x6E673440e622C6aB9Ad7f5b5f41FCc08F3E0502D",
   // Asegúrate de incluir tu dirección en esta lista
 ];
 

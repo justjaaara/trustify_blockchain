@@ -78,12 +78,14 @@ export default function Navbar() {
             </div>
           </div>
           <div className="absolute inset-y-0 right-0 flex items-center pr-2 sm:static sm:inset-auto sm:ml-6 sm:pr-0">
-            <button
-              type="button"
-              className="rounded bg-blue-600 px-4 py-2 text-white text-sm font-medium hover:bg-blue-700"
-            >
-              Conectar Wallet
-            </button>
+            <Link href="/conectar-wallet">
+              <button
+                type="button"
+                className="rounded bg-blue-600 px-4 py-2 text-white text-sm font-medium hover:bg-blue-700"
+              >
+                Conectar Wallet
+              </button>
+            </Link>
           </div>
         </div>
       </div>
