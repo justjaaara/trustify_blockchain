@@ -23,7 +23,7 @@ Trustify Blockchain resuelve estos problemas mediante una plataforma descentrali
 - **Verificación en Blockchain**: Verifica la autenticidad de cualquier certificado mediante su ID o archivo
 - **Panel de Certificados**: Administra todos tus certificados emitidos o recibidos
 - **Conexión con Wallets**: Integración con carteras digitales para firmar transacciones en Avalanche
-- **Sistema de Whitelist**: Control de acceso para emisores autorizados mediante Merkle Trees
+- **Sistema de Whitelist**: Control de acceso para emisores autorizados
 
 ## 🔍 Integración con el Ecosistema Avalanche
 
