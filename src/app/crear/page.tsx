@@ -51,9 +51,48 @@ export default function CrearCertificadoPage() {
   const [isError, setIsError] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string>("");
   const [newCertificateId, setNewCertificateId] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const { login } = usePrivy();
   const web3 = useWeb3();
+
+  // Log para diagnosticar el estado de la conexión de la wallet
+  useEffect(() => {
+    console.log("Estado de la wallet en Crear Certificado:", {
+      isReady: web3.isReady,
+      isInitializing: web3.isInitializing,
+      address: web3.address,
+      error: web3.error,
+      user: web3.user
+        ? {
+            wallets: web3.user.wallets
+              ? web3.user.wallets.map((w) => ({
+                  type: w.walletClientType,
+                  connected: w.connected,
+                  address: w.address,
+                }))
+              : "No wallets",
+          }
+        : "No user",
+    });
+  }, [web3.isReady, web3.isInitializing, web3.address, web3.error, web3.user]);
+
+  // Función para forzar la recarga del estado de la wallet
+  const handleRefreshWalletStatus = async () => {
+    setIsRefreshing(true);
+    try {
+      // Llamamos a la función correcta del hook useWeb3
+      await web3.forceWalletCheck();
+      console.log("Estado de wallet actualizado:", {
+        isReady: web3.isReady,
+        address: web3.address,
+      });
+    } catch (error) {
+      console.error("Error al refrescar el estado de la wallet:", error);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
@@ -190,6 +229,102 @@ export default function CrearCertificadoPage() {
             Asegúrate de revisar toda la información antes de finalizar.
           </p>
         </div>
+      </div>
+
+      {/* Sección de estado de la wallet */}
+      <div className="mb-6">
+        {web3.isReady ? (
+          <div className="p-4 bg-green-900/20 border border-green-500/50 text-green-500 rounded-md flex justify-between items-center">
+            <span>Wallet conectada: {web3.address}</span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRefreshWalletStatus}
+              disabled={isRefreshing}
+            >
+              {isRefreshing ? (
+                <div className="flex items-center gap-2">
+                  <div className="animate-spin h-4 w-4 border-2 border-t-transparent border-green-500 rounded-full"></div>
+                  <span>Actualizando...</span>
+                </div>
+              ) : (
+                <span>Actualizar conexión</span>
+              )}
+            </Button>
+          </div>
+        ) : web3.isInitializing ? (
+          <div className="p-4 bg-yellow-900/20 border border-yellow-500/50 text-yellow-500 rounded-md flex items-center justify-between">
+            <span>Verificando estado de la wallet...</span>
+            <div className="animate-spin h-4 w-4 border-2 border-t-transparent border-yellow-500 rounded-full"></div>
+          </div>
+        ) : (
+          <div className="p-4 bg-blue-900/20 border border-blue-500/50 text-blue-500 rounded-md flex justify-between items-center">
+            <span>
+              Necesitas conectar tu wallet para poder crear certificados.
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                login();
+                setTimeout(() => handleRefreshWalletStatus(), 2000);
+              }}
+            >
+              Conectar Wallet
+            </Button>
+          </div>
+        )}
+
+        {/* Si ya estás conectado pero el sistema no lo detecta, muestra un botón de reintentar */}
+        {!web3.isReady && !web3.isInitializing && (
+          <div className="mt-3 text-center">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRefreshWalletStatus}
+              disabled={isRefreshing}
+            >
+              {isRefreshing ? (
+                <div className="flex items-center gap-2">
+                  <div className="animate-spin h-4 w-4 border-2 border-t-transparent border-primary rounded-full"></div>
+                  <span>Verificando conexión...</span>
+                </div>
+              ) : (
+                <span>
+                  ¿Ya conectaste tu wallet? Haz clic aquí para verificar
+                </span>
+              )}
+            </Button>
+          </div>
+        )}
+
+        {/* Mensaje informativo para Core Wallet */}
+        {!web3.isReady && !web3.isInitializing && (
+          <div className="mt-3">
+            <div className="p-4 bg-blue-900/10 border border-blue-500/30 text-blue-400 rounded-md">
+              <h4 className="font-semibold mb-1">Información de diagnóstico</h4>
+              <p className="text-sm mb-2">
+                Si estás usando Core Wallet y ya la tienes conectada, pero el
+                sistema no la detecta:
+              </p>
+              <ol className="text-sm list-decimal pl-5">
+                <li>Asegúrate que Core Wallet está desbloqueada</li>
+                <li>
+                  Comprueba que estás en la red correcta (Sepolia, Polygon,
+                  etc.)
+                </li>
+                <li>Intenta actualizar la página</li>
+                <li>
+                  Usa el botón "¿Ya conectaste tu wallet?" que aparece arriba
+                </li>
+                <li>
+                  Si nada funciona, intenta desconectar y volver a conectar tu
+                  wallet
+                </li>
+              </ol>
+            </div>
+          </div>
+        )}
       </div>
 
       <form
@@ -356,19 +491,6 @@ export default function CrearCertificadoPage() {
           <div className="mt-4 p-4 bg-red-900/20 border border-red-500/50 text-red-500 rounded-md">
             {errorMessage ||
               "Ocurrió un error al crear el certificado. Por favor, intenta nuevamente."}
-          </div>
-        )}
-
-        {!web3.isReady && !web3.isInitializing && !isError && (
-          <div className="mt-4 p-4 bg-blue-900/20 border border-blue-500/50 text-blue-500 rounded-md">
-            Necesitas conectar tu wallet para poder crear certificados. Haz clic
-            en "Conectar Wallet" en la barra de navegación.
-          </div>
-        )}
-
-        {web3.isReady && (
-          <div className="mt-4 p-4 bg-green-900/20 border border-green-500/50 text-green-500 rounded-md">
-            Wallet conectada: {web3.address}
           </div>
         )}
       </form>

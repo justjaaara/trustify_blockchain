@@ -245,109 +245,163 @@ export const useWeb3 = () => {
   const { login, logout, authenticated, user, ready } = usePrivy();
   const [walletState, setWalletState] = useState({
     isReady: false,
-    isInitializing: false,
+    isInitializing: true, // Cambiamos a true por defecto para mostrar estado de carga inicial
     provider: null,
     address: "",
     error: "",
   });
 
-  useEffect(() => {
-    if (ready) {
-      const checkWalletStatus = async () => {
-        console.log("Verificando estado de la wallet...");
-        console.log("Autenticado:", authenticated);
+  // Función para forzar la recomprobación del estado de la wallet
+  const checkWalletStatus = async () => {
+    console.log("Verificando estado de la wallet (forzado)...");
+    console.log("Autenticado:", authenticated);
 
-        if (!authenticated) {
-          setWalletState({
-            isReady: false,
-            isInitializing: false,
-            provider: null,
-            address: "",
-            error: "",
-          });
-          return;
-        }
+    if (!authenticated) {
+      setWalletState({
+        isReady: false,
+        isInitializing: false,
+        provider: null,
+        address: "",
+        error: "",
+      });
+      return;
+    }
 
-        if (authenticated && user) {
-          setWalletState((prev) => ({ ...prev, isInitializing: true }));
+    if (authenticated && user) {
+      setWalletState((prev) => ({ ...prev, isInitializing: true }));
 
-          try {
-            // Intentar obtener el proveedor de la wallet
-            console.log("Usuario autenticado:", user);
-            console.log("Wallets disponibles:", user.wallets);
+      try {
+        // Intentar obtener el proveedor de la wallet
+        console.log("Usuario autenticado:", user);
+        console.log("Wallets disponibles:", user.wallets);
 
-            if (user.wallets && user.wallets.length > 0) {
-              let provider = null;
+        if (user.wallets && user.wallets.length > 0) {
+          let provider = null;
 
-              // Obtener la wallet conectada - incluye Core explícitamente
-              const connectedWallet = user.wallets.find(
-                (wallet) =>
-                  wallet.walletClientType === "privy" ||
-                  wallet.walletClientType === "metamask" ||
-                  wallet.walletClientType === "walletconnect" ||
-                  wallet.walletClientType === "coinbase_wallet" ||
-                  wallet.walletClientType === "phantom" ||
-                  wallet.walletClientType === "core" || // Añadimos Core explícitamente
-                  wallet.connected === true // También detectamos cualquier wallet conectada
+          // Buscar primero específicamente Core Wallet
+          const coreWallet = user.wallets.find(
+            (wallet) => wallet.walletClientType === "core"
+          );
+
+          // Si no hay Core Wallet, buscar cualquier otra wallet conectada
+          const connectedWallet =
+            coreWallet ||
+            user.wallets.find(
+              (wallet) =>
+                wallet.connected === true ||
+                wallet.walletClientType === "privy" ||
+                wallet.walletClientType === "metamask" ||
+                wallet.walletClientType === "walletconnect" ||
+                wallet.walletClientType === "coinbase_wallet" ||
+                wallet.walletClientType === "phantom"
+            );
+
+          console.log("Wallet seleccionada:", connectedWallet);
+
+          if (connectedWallet) {
+            try {
+              console.log(
+                "Solicitando proveedor para",
+                connectedWallet.walletClientType
               );
 
-              console.log("Wallet seleccionada:", connectedWallet);
-
-              if (connectedWallet) {
+              // Para Core Wallet, intentar un enfoque específico primero
+              if (connectedWallet.walletClientType === "core") {
+                console.log("Detectada Core Wallet, usando enfoque específico");
                 try {
-                  console.log(
-                    "Solicitando proveedor para",
-                    connectedWallet.walletClientType
-                  );
-                  provider = await user.getEthereumProvider();
-                  console.log("Proveedor obtenido:", provider);
-
-                  // Obtener la dirección de la wallet
-                  let address = "";
-                  if (connectedWallet.address) {
-                    address = connectedWallet.address;
+                  // Primer intento: obtener la wallet de window.ethereum
+                  if (typeof window !== "undefined" && window.ethereum) {
                     console.log(
-                      "Dirección obtenida del objeto wallet:",
-                      address
+                      "Intentando obtener Core Wallet desde window.ethereum"
                     );
-                  } else if (provider && provider.request) {
+                    provider = window.ethereum;
+                  }
+
+                  // Si aún no tenemos provider, pedirlo a través de Privy
+                  if (!provider) {
+                    provider = await user.getEthereumProvider();
+                  }
+
+                  // Para Core Wallet, intentar conectar explícitamente
+                  if (provider && provider.request) {
+                    try {
+                      await provider.request({ method: "eth_requestAccounts" });
+                      console.log("Core Wallet conectada explícitamente");
+                    } catch (e) {
+                      console.warn(
+                        "No se pudo conectar explícitamente a Core Wallet:",
+                        e
+                      );
+                    }
+                  }
+                } catch (coreError) {
+                  console.error("Error al conectar Core Wallet:", coreError);
+                  // Caer en el enfoque estándar
+                  provider = await user.getEthereumProvider();
+                }
+              } else {
+                // Para otras wallets, usar el enfoque estándar
+                provider = await user.getEthereumProvider();
+              }
+
+              console.log("Proveedor obtenido:", provider);
+
+              // Obtener la dirección de la wallet
+              let address = "";
+
+              // Primero intentamos obtener la dirección del objeto wallet
+              if (connectedWallet.address) {
+                address = connectedWallet.address;
+                console.log("Dirección obtenida del objeto wallet:", address);
+              }
+
+              // Si no tenemos la dirección, intentamos obtenerla del provider
+              if (!address && provider) {
+                try {
+                  // Método 1: eth_requestAccounts
+                  if (provider.request) {
                     try {
                       const accounts = await provider.request({
                         method: "eth_requestAccounts",
                       });
-                      address = accounts[0];
-                      console.log(
-                        "Dirección obtenida mediante eth_requestAccounts:",
-                        address
-                      );
+                      if (accounts && accounts.length > 0) {
+                        address = accounts[0];
+                        console.log(
+                          "Dirección obtenida mediante eth_requestAccounts:",
+                          address
+                        );
+                      }
                     } catch (error) {
                       console.error(
                         "Error al obtener cuentas mediante eth_requestAccounts:",
                         error
                       );
-
-                      // Intento alternativo con eth_accounts
-                      try {
-                        const accounts = await provider.request({
-                          method: "eth_accounts",
-                        });
-                        if (accounts && accounts.length > 0) {
-                          address = accounts[0];
-                          console.log(
-                            "Dirección obtenida mediante eth_accounts:",
-                            address
-                          );
-                        }
-                      } catch (secondError) {
-                        console.error(
-                          "Error al obtener cuentas mediante eth_accounts:",
-                          secondError
-                        );
-                      }
                     }
                   }
 
-                  if (!address && provider && provider.selectedAddress) {
+                  // Método 2: eth_accounts (si el primero falló)
+                  if (!address && provider.request) {
+                    try {
+                      const accounts = await provider.request({
+                        method: "eth_accounts",
+                      });
+                      if (accounts && accounts.length > 0) {
+                        address = accounts[0];
+                        console.log(
+                          "Dirección obtenida mediante eth_accounts:",
+                          address
+                        );
+                      }
+                    } catch (secondError) {
+                      console.error(
+                        "Error al obtener cuentas mediante eth_accounts:",
+                        secondError
+                      );
+                    }
+                  }
+
+                  // Método 3: selectedAddress (propiedad de algunos providers)
+                  if (!address && provider.selectedAddress) {
                     address = provider.selectedAddress;
                     console.log(
                       "Dirección obtenida de selectedAddress:",
@@ -355,72 +409,115 @@ export const useWeb3 = () => {
                     );
                   }
 
-                  console.log("Dirección final obtenida:", address);
-
-                  setWalletState({
-                    isReady: !!address, // Solo marcamos como ready si tenemos una dirección
-                    isInitializing: false,
-                    provider,
-                    address,
-                    error: !address
-                      ? "No se pudo obtener la dirección de la wallet"
-                      : "",
-                  });
+                  // Método 4: Solo para Core Wallet
+                  if (
+                    !address &&
+                    connectedWallet.walletClientType === "core" &&
+                    provider.provider
+                  ) {
+                    try {
+                      // Probar con el provider interno
+                      const innerProvider = provider.provider;
+                      if (innerProvider.selectedAddress) {
+                        address = innerProvider.selectedAddress;
+                        console.log(
+                          "Dirección obtenida de Core Wallet innerProvider:",
+                          address
+                        );
+                      } else if (innerProvider.request) {
+                        const accounts = await innerProvider.request({
+                          method: "eth_accounts",
+                        });
+                        if (accounts && accounts.length > 0) {
+                          address = accounts[0];
+                          console.log(
+                            "Dirección obtenida de Core Wallet mediante provider interno:",
+                            address
+                          );
+                        }
+                      }
+                    } catch (coreError) {
+                      console.error(
+                        "Error al obtener dirección específica de Core:",
+                        coreError
+                      );
+                    }
+                  }
                 } catch (error) {
-                  console.error("Error al obtener el proveedor:", error);
-                  setWalletState({
-                    isReady: false,
-                    isInitializing: false,
-                    provider: null,
-                    address: "",
-                    error: `Error al obtener el proveedor: ${
-                      error instanceof Error
-                        ? error.message
-                        : "Error desconocido"
-                    }`,
-                  });
+                  console.error(
+                    "Error genérico al obtener la dirección:",
+                    error
+                  );
                 }
-              } else {
-                // No hay wallet conectada que podamos utilizar
-                console.log("No se encontró wallet conectada compatible");
-                setWalletState({
-                  isReady: false,
-                  isInitializing: false,
-                  provider: null,
-                  address: "",
-                  error: authenticated
-                    ? "No se encontró una wallet compatible. Por favor, conecta Metamask, Core Wallet, WalletConnect o Coinbase Wallet"
-                    : "Usuario no autenticado",
-                });
               }
-            } else {
-              console.log("No hay wallets disponibles");
+
+              console.log("Dirección final obtenida:", address);
+
+              setWalletState({
+                isReady: !!address, // Solo marcamos como ready si tenemos una dirección
+                isInitializing: false,
+                provider,
+                address,
+                error: !address
+                  ? "No se pudo obtener la dirección de la wallet"
+                  : "",
+              });
+            } catch (error) {
+              console.error("Error al obtener el proveedor:", error);
               setWalletState({
                 isReady: false,
                 isInitializing: false,
                 provider: null,
                 address: "",
-                error: authenticated
-                  ? "No se encontró una wallet conectada"
-                  : "Usuario no autenticado",
+                error: `Error al obtener el proveedor: ${
+                  error instanceof Error ? error.message : "Error desconocido"
+                }`,
               });
             }
-          } catch (error) {
-            console.error("Error al verificar el estado de la wallet:", error);
+          } else {
+            // No hay wallet conectada que podamos utilizar
+            console.log("No se encontró wallet conectada compatible");
             setWalletState({
               isReady: false,
               isInitializing: false,
               provider: null,
               address: "",
-              error:
-                error instanceof Error
-                  ? error.message
-                  : "Error desconocido al inicializar la wallet",
+              error: authenticated
+                ? "No se encontró una wallet compatible. Por favor, conecta Metamask, Core Wallet, WalletConnect o Coinbase Wallet"
+                : "Usuario no autenticado",
             });
           }
+        } else {
+          console.log("No hay wallets disponibles");
+          setWalletState({
+            isReady: false,
+            isInitializing: false,
+            provider: null,
+            address: "",
+            error: authenticated
+              ? "No se encontró una wallet conectada"
+              : "Usuario no autenticado",
+          });
         }
-      };
+      } catch (error) {
+        console.error("Error al verificar el estado de la wallet:", error);
+        setWalletState({
+          isReady: false,
+          isInitializing: false,
+          provider: null,
+          address: "",
+          error:
+            error instanceof Error
+              ? error.message
+              : "Error desconocido al inicializar la wallet",
+        });
+      }
+    }
+  };
 
+  // Ejecutar la comprobación al cargar o cuando cambian las dependencias
+  useEffect(() => {
+    if (ready) {
       checkWalletStatus();
     }
   }, [ready, authenticated, user]);
@@ -432,9 +529,16 @@ export const useWeb3 = () => {
         await login();
         throw new Error("Por favor, completa la conexión de la wallet");
       }
-      throw new Error(
-        "La wallet no está lista. Verifica que esté conectada correctamente"
-      );
+
+      // Intentar verificar una vez más si la wallet está conectada
+      await checkWalletStatus();
+
+      // Si después de verificar sigue sin estar lista, mostramos el error
+      if (!walletState.isReady) {
+        throw new Error(
+          "La wallet no está lista. Verifica que esté conectada correctamente"
+        );
+      }
     }
     return walletState.provider;
   };
@@ -451,6 +555,7 @@ export const useWeb3 = () => {
     // Acciones de autenticación
     login,
     logout,
+    forceWalletCheck: checkWalletStatus, // Exponemos la función para forzar la verificación
 
     // Funciones de contrato con verificación de wallet conectada
     issueCertificate: async (
